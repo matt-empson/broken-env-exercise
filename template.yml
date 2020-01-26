@@ -1,0 +1,201 @@
+Parameters:
+  Name:
+    Description: Enter your name. Used for resource tagging
+    Type: String
+  SSH:
+    Description: Enter your public IP address
+    Type: String
+  sshKey:
+    Default: matt.empson
+    Description: SSH Key Pair Name
+    Type: String
+Resources:
+  IGW:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -IGW
+    Type: AWS::EC2::InternetGateway
+  InboundDeny:
+    Properties:
+      CidrBlock: '0.0.0.0/0'
+      NetworkAclId: !Ref 'NACL'
+      Protocol: -1
+      RuleAction: deny
+      RuleNumber: 10
+    Type: AWS::EC2::NetworkAclEntry
+  JumpBox:
+    Properties:
+      ImageId: ami-0b8b10b5bf11f3a22
+      InstanceType: t2.micro
+      KeyName: !Ref 'sshKey'
+      SecurityGroupIds:
+        - !Ref 'SecurityGroup'
+      SubnetId: !Ref 'Subnet1'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -jump-box
+    Type: AWS::EC2::Instance
+  NACL:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -NACL
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::NetworkAcl
+  OutBoundAllow:
+    Properties:
+      CidrBlock: '0.0.0.0/0'
+      Egress: 'true'
+      NetworkAclId: !Ref 'NACL'
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: 10
+    Type: AWS::EC2::NetworkAclEntry
+  PublicRouteTable:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -PUBLIC
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::RouteTable
+  SGICMPAllow:
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      FromPort: -1
+      GroupId: !Ref 'SecurityGroup'
+      IpProtocol: '1'
+      ToPort: -1
+    Type: AWS::EC2::SecurityGroupEgress
+  SGSSHAllow:
+    Properties:
+      CidrIp: !Join
+        - ''
+        - - !Ref 'SSH'
+          - /32
+      Description: !Join
+        - ''
+        - - !Ref 'Name'
+          - s source IP
+      FromPort: 22
+      GroupId: !Ref 'SecurityGroup'
+      IpProtocol: '6'
+      ToPort: 22
+    Type: AWS::EC2::SecurityGroupIngress
+  SSHAllow:
+    Properties:
+      CidrBlock: !Join
+        - ''
+        - - !Ref 'SSH'
+          - /32
+      NetworkAclId: !Ref 'NACL'
+      PortRange:
+        From: 22
+        To: 22
+      Protocol: 6
+      RuleAction: allow
+      RuleNumber: 20
+    Type: AWS::EC2::NetworkAclEntry
+  SecurityGroup:
+    Properties:
+      GroupDescription: Jump-Box-SG
+      GroupName: jumpbox
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -jump-box
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::SecurityGroup
+  Subnet0:
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: 10.0.0.0/24
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet0NACL:
+    Properties:
+      NetworkAclId: !Ref 'NACL'
+      SubnetId: !Ref 'Subnet0'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet0RT:
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      SubnetId: !Ref 'Subnet0'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  Subnet1:
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: 10.0.1.0/24
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet1NACL:
+    Properties:
+      NetworkAclId: !Ref 'NACL'
+      SubnetId: !Ref 'Subnet1'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet1RT:
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      SubnetId: !Ref 'Subnet1'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  Subnet2:
+    Properties:
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: 10.0.2.0/24
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet2NACL:
+    Properties:
+      NetworkAclId: !Ref 'NACL'
+      SubnetId: !Ref 'Subnet2'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet2RT:
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      SubnetId: !Ref 'Subnet2'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  VPC:
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -VPC
+    Type: AWS::EC2::VPC
