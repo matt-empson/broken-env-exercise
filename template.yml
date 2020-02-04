@@ -10,6 +10,21 @@ Parameters:
     Description: SSH Key Pair Name
     Type: String
 Resources:
+  Cloudfront:
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+          ForwardedValues:
+            QueryString: 'false'
+          TargetOriginId: '1'
+          ViewerProtocolPolicy: allow-all
+        Enabled: 'true'
+        HttpVersion: http2
+        Origins:
+          - DomainName: cloudfrontbucket-785271490484687.s3-ap-southeast-2.amazonaws.com
+            Id: '1'
+            S3OriginConfig: {}
+    Type: AWS::CloudFront::Distribution
   IGW:
     Properties:
       Tags:
@@ -27,6 +42,11 @@ Resources:
       RuleAction: deny
       RuleNumber: 10
     Type: AWS::EC2::NetworkAclEntry
+  InstanceProfile:
+    Properties:
+      Roles:
+        - !Ref 'S3Role'
+    Type: AWS::IAM::InstanceProfile
   JumpBox:
     Properties:
       ImageId: ami-0b8b10b5bf11f3a22
@@ -49,9 +69,53 @@ Resources:
           Value: !Join
             - ''
             - - !Ref 'Name'
-              - -NACL
+              - -NACL-PUBLIC
       VpcId: !Ref 'VPC'
     Type: AWS::EC2::NetworkAcl
+  NATAllowIN:
+    Properties:
+      CidrIp: 10.0.0.0/16
+      Description: VPC CIDR
+      FromPort: -1
+      GroupId: !Ref 'NatSecurityGroup'
+      IpProtocol: '-1'
+      ToPort: -1
+    Type: AWS::EC2::SecurityGroupIngress
+  NATAllowOUT:
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      FromPort: -1
+      GroupId: !Ref 'NatSecurityGroup'
+      IpProtocol: '-1'
+      ToPort: -1
+    Type: AWS::EC2::SecurityGroupEgress
+  NatInstance:
+    Properties:
+      ImageId: ami-0f113fc1f0244a121
+      InstanceType: t2.micro
+      KeyName: !Ref 'sshKey'
+      SecurityGroupIds:
+        - !Ref 'NatSecurityGroup'
+      SubnetId: !Ref 'Subnet1'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -nat
+    Type: AWS::EC2::Instance
+  NatSecurityGroup:
+    Properties:
+      GroupDescription: NAT-SG
+      GroupName: nat
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -nat-instance
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::SecurityGroup
   OutBoundAllow:
     Properties:
       CidrBlock: '0.0.0.0/0'
@@ -61,6 +125,49 @@ Resources:
       RuleAction: allow
       RuleNumber: 10
     Type: AWS::EC2::NetworkAclEntry
+  PrivateInboundAllow:
+    Properties:
+      CidrBlock: '0.0.0.0/0'
+      NetworkAclId: !Ref 'PrivateNACL'
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: 10
+    Type: AWS::EC2::NetworkAclEntry
+  PrivateNACL:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -NACL-PRIVATE
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::NetworkAcl
+  PrivateOutBoundAllow:
+    Properties:
+      CidrBlock: '0.0.0.0/0'
+      Egress: 'true'
+      NetworkAclId: !Ref 'PrivateNACL'
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: 10
+    Type: AWS::EC2::NetworkAclEntry
+  PrivateRouteTable:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -PRIVATE
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::RouteTable
+  PrivateSubnetRoute:
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      InstanceId: !Ref 'NatInstance'
+      RouteTableId: !Ref 'PrivateRouteTable'
+    Type: AWS::EC2::Route
   PublicRouteTable:
     Properties:
       Tags:
@@ -71,6 +178,78 @@ Resources:
               - -PUBLIC
       VpcId: !Ref 'VPC'
     Type: AWS::EC2::RouteTable
+  S3AllowOUT:
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      FromPort: -1
+      GroupId: !Ref 'S3SecurityGroup'
+      IpProtocol: '-1'
+      ToPort: -1
+    Type: AWS::EC2::SecurityGroupEgress
+  S3Instance:
+    Properties:
+      IamInstanceProfile: !Ref 'InstanceProfile'
+      ImageId: ami-0b8b10b5bf11f3a22
+      InstanceType: t2.micro
+      KeyName: !Ref 'sshKey'
+      SecurityGroupIds:
+        - !Ref 'S3SecurityGroup'
+      SubnetId: !Ref 'Subnet4'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -S3-instance
+    Type: AWS::EC2::Instance
+  S3NATAllowIN:
+    Properties:
+      CidrIp: 10.0.0.0/16
+      Description: VPC CIDR
+      FromPort: -1
+      GroupId: !Ref 'S3SecurityGroup'
+      IpProtocol: '-1'
+      ToPort: -1
+    Type: AWS::EC2::SecurityGroupIngress
+  S3Role:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:DeleteObject
+                  - s3:GetObject
+                  - s3:PutObject
+                Condition:
+                  IpAddress:
+                    aws:SourceIp: 10.0.0.0/16
+                Effect: Allow
+                Resource:
+                  - arn:aws:s3:::namebucket-*/*
+                Sid: S3Policy
+          PolicyName: S3Policy
+      RoleName: S3Role
+    Type: AWS::IAM::Role
+  S3SecurityGroup:
+    Properties:
+      GroupDescription: S3-SG
+      GroupName: S3
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'Name'
+              - -S3-instance
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::SecurityGroup
   SGICMPAllow:
     Properties:
       CidrIp: '0.0.0.0/0'
@@ -130,7 +309,7 @@ Resources:
       MapPublicIpOnLaunch: 'true'
       Tags:
         - Key: Name
-          Value: 10.0.0.0/24
+          Value: 10.0.0.0/24-PUBLIC
       VpcId: !Ref 'VPC'
     Type: AWS::EC2::Subnet
   Subnet0NACL:
@@ -153,7 +332,7 @@ Resources:
       MapPublicIpOnLaunch: 'true'
       Tags:
         - Key: Name
-          Value: 10.0.1.0/24
+          Value: 10.0.1.0/24-PUBLIC
       VpcId: !Ref 'VPC'
     Type: AWS::EC2::Subnet
   Subnet1NACL:
@@ -176,7 +355,7 @@ Resources:
       MapPublicIpOnLaunch: 'true'
       Tags:
         - Key: Name
-          Value: 10.0.2.0/24
+          Value: 10.0.2.0/24-PUBLIC
       VpcId: !Ref 'VPC'
     Type: AWS::EC2::Subnet
   Subnet2NACL:
@@ -189,6 +368,75 @@ Resources:
       RouteTableId: !Ref 'PublicRouteTable'
       SubnetId: !Ref 'Subnet2'
     Type: AWS::EC2::SubnetRouteTableAssociation
+  Subnet4:
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.4.0/24
+      MapPublicIpOnLaunch: 'false'
+      Tags:
+        - Key: Name
+          Value: 10.0.4.0/24-PRIVATE
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet4NACL:
+    Properties:
+      NetworkAclId: !Ref 'PrivateNACL'
+      SubnetId: !Ref 'Subnet4'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet4RT:
+    Properties:
+      RouteTableId: !Ref 'PrivateRouteTable'
+      SubnetId: !Ref 'Subnet4'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  Subnet5:
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.5.0/24
+      MapPublicIpOnLaunch: 'false'
+      Tags:
+        - Key: Name
+          Value: 10.0.5.0/24-PRIVATE
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet5NACL:
+    Properties:
+      NetworkAclId: !Ref 'PrivateNACL'
+      SubnetId: !Ref 'Subnet5'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet5RT:
+    Properties:
+      RouteTableId: !Ref 'PrivateRouteTable'
+      SubnetId: !Ref 'Subnet5'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  Subnet6:
+    Properties:
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.6.0/24
+      MapPublicIpOnLaunch: 'false'
+      Tags:
+        - Key: Name
+          Value: 10.0.6.0/24-PRIVATE
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  Subnet6NACL:
+    Properties:
+      NetworkAclId: !Ref 'PrivateNACL'
+      SubnetId: !Ref 'Subnet6'
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+  Subnet6RT:
+    Properties:
+      RouteTableId: !Ref 'PrivateRouteTable'
+      SubnetId: !Ref 'Subnet6'
+    Type: AWS::EC2::SubnetRouteTableAssociation
   VPC:
     Properties:
       CidrBlock: 10.0.0.0/16
@@ -199,3 +447,29 @@ Resources:
             - - !Ref 'Name'
               - -VPC
     Type: AWS::EC2::VPC
+  cloudfrontBucket:
+    Properties:
+      AccessControl: Private
+      BucketName: cloudfrontbucket-785271490484687
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: 'true'
+        BlockPublicPolicy: 'true'
+        IgnorePublicAcls: 'true'
+        RestrictPublicBuckets: 'true'
+      Tags:
+        - Key: Name
+          Value: cloudfrontBucket-785271490484687
+    Type: AWS::S3::Bucket
+  nameBucket:
+    Properties:
+      AccessControl: Private
+      BucketName: namebucket-670043222047513
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: 'true'
+        BlockPublicPolicy: 'true'
+        IgnorePublicAcls: 'true'
+        RestrictPublicBuckets: 'true'
+      Tags:
+        - Key: Name
+          Value: nameBucket-670043222047513
+    Type: AWS::S3::Bucket
