@@ -1,6 +1,6 @@
 awacs==0.9.7
 cfn-flip==1.2.2
 Click==7.0
-PyYAML==5.3
+PyYAML==5.4
 six==1.14.0
 troposphere==2.5.3
